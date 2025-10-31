@@ -124,6 +124,171 @@ private void searchContact() {
         loadContacts();
     }
 }
+private void exportToCSV() {
+    JFileChooser fileChooser = new JFileChooser();
+    fileChooser.setDialogTitle("Simpan File CSV");
+
+    int userSelection = fileChooser.showSaveDialog(this);
+    if (userSelection != JFileChooser.APPROVE_OPTION) return;
+
+    File fileToSave = fileChooser.getSelectedFile();
+    // Tambahkan ekstensi .csv bila belum ada
+    if (!fileToSave.getAbsolutePath().toLowerCase().endsWith(".csv")) {
+        fileToSave = new File(fileToSave.getAbsolutePath() + ".csv");
+    }
+
+    try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileToSave))) {
+        // Header CSV
+        writer.write("ID,Nama,Nomor Telepon,Kategori");
+        writer.newLine();
+
+        for (int i = 0; i < model.getRowCount(); i++) {
+            String id        = String.valueOf(model.getValueAt(i, 0));
+            String nama      = String.valueOf(model.getValueAt(i, 1));
+            String noTelp    = String.valueOf(model.getValueAt(i, 2));
+            String kategori  = String.valueOf(model.getValueAt(i, 3));
+
+            // Tulis baris CSV
+            writer.write(id + "," + nama + "," + noTelp + "," + kategori);
+            writer.newLine();
+        }
+
+        JOptionPane.showMessageDialog(
+            this,
+            "Data berhasil diekspor ke:\n" + fileToSave.getAbsolutePath(),
+            "Sukses",
+            JOptionPane.INFORMATION_MESSAGE
+        );
+    } catch (IOException ex) {
+        showError("Gagal menulis file: " + ex.getMessage());
+    }
+}
+
+private void importFromCSV() {
+    showCSVGuide();
+
+    int confirm = JOptionPane.showConfirmDialog(
+        this,
+        "Apakah Anda yakin file CSV yang dipilih sudah sesuai dengan format?",
+        "Konfirmasi Impor CSV",
+        JOptionPane.YES_NO_OPTION
+    );
+    if (confirm != JOptionPane.YES_OPTION) return;
+
+    JFileChooser fileChooser = new JFileChooser();
+    fileChooser.setDialogTitle("Pilih File CSV");
+
+    int userSelection = fileChooser.showOpenDialog(this);
+    if (userSelection != JFileChooser.APPROVE_OPTION) return;
+
+    File fileToOpen = fileChooser.getSelectedFile();
+
+    try (BufferedReader reader = new BufferedReader(new FileReader(fileToOpen))) {
+        String line = reader.readLine(); // baca header
+
+        if (!validateCSVHeader(line)) {
+            JOptionPane.showMessageDialog(
+                this,
+                "Format header CSV tidak valid.\nPastikan header adalah:\nID,Nama,Nomor Telepon,Kategori",
+                "Kesalahan CSV",
+                JOptionPane.ERROR_MESSAGE
+            );
+            return;
+        }
+
+        int rowCount = 0;
+        int errorCount = 0;
+        int duplicateCount = 0;
+        StringBuilder errorLog = new StringBuilder("Baris dengan kesalahan:\n");
+
+        while ((line = reader.readLine()) != null) {
+            rowCount++;
+
+            String[] data = line.split(",", -1); // -1 agar kolom kosong tetap dihitung
+            if (data.length != 4) {
+                errorCount++;
+                errorLog.append("Baris ").append(rowCount + 1).append(": Format kolom tidak sesuai.\n");
+                continue;
+            }
+
+            String nama         = data[1].trim();
+            String nomorTelepon = data[2].trim();
+            String kategori     = data[3].trim();
+
+            if (nama.isEmpty() || nomorTelepon.isEmpty()) {
+                errorCount++;
+                errorLog.append("Baris ").append(rowCount + 1).append(": Nama atau Nomor Telepon kosong.\n");
+                continue;
+            }
+
+            if (!validatePhoneNumber(nomorTelepon)) {
+                errorCount++;
+                errorLog.append("Baris ").append(rowCount + 1).append(": Nomor Telepon tidak valid.\n");
+                continue;
+            }
+
+            try {
+                if (controller.isDuplicatePhoneNumber(nomorTelepon, null)) {
+                    duplicateCount++;
+                    errorLog.append("Baris ").append(rowCount + 1).append(": Kontak dengan nomor ini sudah ada.\n");
+                    continue;
+                }
+            } catch (SQLException ex) {
+                Logger.getLogger(AplikasiPengelolaanKontakFrame.class.getName()).log(Level.SEVERE, null, ex);
+                errorCount++;
+                errorLog.append("Baris ").append(rowCount + 1).append(": Gagal memeriksa duplikasi - ")
+                        .append(ex.getMessage()).append("\n");
+                continue;
+            }
+
+            try {
+                controller.addContact(nama, nomorTelepon, kategori);
+            } catch (SQLException ex) {
+                errorCount++;
+                errorLog.append("Baris ").append(rowCount + 1)
+                        .append(": Gagal menyimpan ke database - ")
+                        .append(ex.getMessage()).append("\n");
+            }
+        }
+
+        loadContacts();
+
+        if (errorCount > 0 || duplicateCount > 0) {
+            errorLog.append("\nTotal baris dengan kesalahan: ").append(errorCount).append("\n");
+            errorLog.append("Total baris duplikat: ").append(duplicateCount).append("\n");
+
+            JOptionPane.showMessageDialog(
+                this,
+                errorLog.toString(),
+                "Kesalahan Impor",
+                JOptionPane.WARNING_MESSAGE
+            );
+        } else {
+            JOptionPane.showMessageDialog(this, "Semua data berhasil diimpor.", "Sukses", JOptionPane.INFORMATION_MESSAGE);
+        }
+
+    } catch (IOException ex) {
+        showError("Gagal membaca file: " + ex.getMessage());
+    }
+}
+
+private void showCSVGuide() {
+    String guideMessage =
+        "Format CSV untuk impor data:\n" +
+        "- Header wajib: ID,Nama,Nomor Telepon,Kategori\n" +
+        "- ID boleh kosong (akan diisi otomatis oleh database jika pakai AUTOINCREMENT)\n" +
+        "- Nama dan Nomor Telepon wajib diisi\n" +
+        "- Contoh:\n" +
+        "  1,Andi,08123456789,Teman\n" +
+        "  2,Budi Doremi,08567890123,Keluarga\n\n" +
+        "Pastikan file CSV sesuai format sebelum melakukan impor.";
+    JOptionPane.showMessageDialog(this, guideMessage, "Panduan Format CSV", JOptionPane.INFORMATION_MESSAGE);
+}
+
+private boolean validateCSVHeader(String header) {
+    return header != null
+        && header.trim().equalsIgnoreCase("ID,Nama,Nomor Telepon,Kategori");
+}
 
    private void loadContacts() {
    try {
@@ -330,8 +495,18 @@ private void showError(String message) {
         jScrollPane2.setViewportView(tblKontak);
 
         btnExport.setText("Export");
+        btnExport.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnExportActionPerformed(evt);
+            }
+        });
 
         btnImport.setText("Import");
+        btnImport.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                btnImportActionPerformed(evt);
+            }
+        });
 
         javax.swing.GroupLayout jPanel1Layout = new javax.swing.GroupLayout(jPanel1);
         jPanel1.setLayout(jPanel1Layout);
@@ -489,6 +664,14 @@ populateInputFields(selectedRow);
     private void txtPencarianKeyTyped(java.awt.event.KeyEvent evt) {//GEN-FIRST:event_txtPencarianKeyTyped
        searchContact();
     }//GEN-LAST:event_txtPencarianKeyTyped
+
+    private void btnExportActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnExportActionPerformed
+        exportToCSV();
+    }//GEN-LAST:event_btnExportActionPerformed
+
+    private void btnImportActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnImportActionPerformed
+        importFromCSV();
+    }//GEN-LAST:event_btnImportActionPerformed
 
     /**
      * @param args the command line arguments
